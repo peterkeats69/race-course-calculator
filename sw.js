@@ -1,9 +1,10 @@
-const CACHE_NAME = 'racecalc-v1';
+const CACHE_NAME = 'race-course-calculator-v1';
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
   './sw.js'
+  // add icons here later like './icons/icon-192.png'
 ];
 
 self.addEventListener('install', (e) => {
@@ -23,6 +24,8 @@ self.addEventListener('fetch', (e) => {
       const copy = res.clone();
       caches.open(CACHE_NAME).then(cache => cache.put(e.request, copy));
       return res;
-    }).catch(() => caches.match(e.request).then(cached => cached || caches.match('./index.html')))
+    }).catch(() =>
+      caches.match(e.request).then(cached => cached || caches.match('./index.html'))
+    )
   );
 });
