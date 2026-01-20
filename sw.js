@@ -1,9 +1,9 @@
 const CACHE_NAME = 'racecalc-v1';
 const ASSETS = [
-  '/index.html',
-  '/manifest.webmanifest',
-  '/sw.js'
-  // If you add images/icons, list them here too, e.g. '/icons/icon-192.png'
+  './',
+  './index.html',
+  './manifest.webmanifest',
+  './sw.js'
 ];
 
 self.addEventListener('install', (e) => {
@@ -18,13 +18,11 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  const req = e.request;
-  // Network-first with cache fallback
   e.respondWith(
-    fetch(req).then(res => {
+    fetch(e.request).then(res => {
       const copy = res.clone();
-      caches.open(CACHE_NAME).then(cache => cache.put(req, copy));
+      caches.open(CACHE_NAME).then(cache => cache.put(e.request, copy));
       return res;
-    }).catch(() => caches.match(req).then(cached => cached || caches.match('/index.html')))
+    }).catch(() => caches.match(e.request).then(cached => cached || caches.match('./index.html')))
   );
 });
