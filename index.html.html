@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Multi Course Race Calculator — Beta 3L</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+body{font-family:Arial;margin:12px}
+h2{margin-bottom:4px}
+.build{font-size:14px;color:#444;margin-bottom:14px}
+.row{display:flex;gap:20px;flex-wrap:wrap}
+label{display:block;margin-top:14px;font-size:18px;font-weight:700}
+input,select{width:220px;padding:10px;font-size:20px;font-weight:700;border:2px solid #333;border-radius:6px}
+.section{margin-top:20px}
+.card{border:2px solid #0d355f;border-radius:8px;padding:10px;margin-bottom:8px;background:#f7f9fb}
+.line1{font-size:20px;font-weight:700;color:#003366}
+.line2{font-size:18px;font-weight:700;color:#000}
+.hidden{display:none!important}
+.footer{text-align:center;margin-top:30px;font-size:14px;color:#555}
+@media(max-width:700px){input,select{width:100%}.row{flex-direction:column;gap:0}}
+</style>
+</head>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0d355f">
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(console.error);
+  });
+}
+</script>
+<body>
+<h2>Multi Course Race Calculator — Beta 3L</h2>
+<div class="build">8 Nov 2025 — Simple vs Strict geometry, slant distances, hybrid leg = input</div>
+
+<div class="row">
+  <label>Course type
+    <select id="courseType">
+      <option value="trapezoid" selected>Trapezoid</option>
+      <option value="triangle">Triangle (equal legs)</option>
+      <option value="gybe90">90° Gybe (71% reaches)</option>
+    </select>
+  </label>
+  <label>Axis (°):<input id="axis" type="number" value="0"></label>
+  <label>Start Line (m):<input id="lineLen" type="number" value="200"></label>
+  <label>Course Length (nm):<input id="courseLenNm" type="number" step="0.01" value="0.6"></label>
+</div>
+
+<div class="row">
+  <label>Geometry mode
+    <select id="geomMode">
+      <option value="simple" selected>Simple (Start-line anchored)</option>
+      <option value="strict">Strict (Mark-1 anchored)</option>
+    </select>
+  </label>
+</div>
+
+<!-- Trapezoid inputs -->
+<div id="trapezoidInputs" class="row">
+  <label>Angle
+    <select id="trapAngle">
+      <option value="60">60°</option>
+      <option value="70" selected>70°</option>
+      <option value="80">80°</option>
+    </select>
+  </label>
+  <label>Gate 4 Width (m):<input id="gateW" type="number" value="30"></label>
+  <label>Gate 3 Width (m):<input id="gate3W" type="number" value="30"></label>
+  <label>Upwind offset (m):<input id="gateOff" type="number" value="93"></label>
+  <label>Reach %:<input id="reachRatio" type="number" step="0.1" value="67"></label>
+  <label>Reach (nm) — Default 67%:<input id="reachLenNm" type="number" step="0.01"></label>
+</div>
+
+<!-- Hybrid (user enters desired Hybrid 4P → 1 leg) -->
+<div id="hybridRow" class="row">
+  <label><input type="checkbox" id="enableHybrid" style="width:auto;margin-right:8px;transform:scale(1.2)">Enable Hybrid Gate 4</label>
+  <label id="hybLegM" class="hidden">Hybrid leg (m):<input id="hybridLegM" type="number" value="0"></label>
+  <label id="hybLegNm" class="hidden">Hybrid leg (nm):<input id="hybridLegNm" type="number" step="0.01" value="0.00"></label>
+</div>
+
+<div class="section" id="results"></div>
+<div class="footer">Multi Course Race Calculator — Beta 3L © Peter Keats 2025</div>
+
+<script>
+// ---- helpers ----
+function toRad(d){return d*Math.PI/180}
+function norm(d){return(d%360+360)%360}
+function vec(b){return{x:Math.sin(toRad(b)),y:Math.cos(toRad(b))}}
+function add(p,q){return{x:p.x+q.x,y:p.y+q.y}}
+function scale(v,s){return{x:v.x*s,y:v.y*s}}
+function dist(p,q){let dx=q.x-p.x,dy=q.y-p.y;return Math.hypot(dx,dy)}
+function brg(p,q){let dx=q.x-p.x,dy=q.y-p.y;return norm(Math.atan2(dx,dy)*180/Math.PI)}
+function card(a,b,A,B){let d=dist(A,B),b1=brg(A,B),b2=brg(B,A);
+  return `<div class="card"><div class="line1">${a}→${b}: ${b1.toFixed(0)}° | ${b}→${a}: ${b2.toFixed(0)}°</div>
+  <div class="line2">${Math.round(d)} m | ${(d/1852).toFixed(2)} nm</div></div>`}
+function dirs(angle){
+  angle=Number(angle);
+  if(angle===60) return {b41:0,b12:240,b23:180,b34:60};
+  if(angle===80) return {b41:0,b12:260,b23:180,b34:80};
+  return {b41:0,b12:250,b23:180,b34:70};
+}
+
+// ---- reach sync ----
+let syncing=false;
+function syncFromPercent(){
+  if(syncing) return; syncing=true;
+  const lenNm=+document.getElementById('courseLenNm').value||0;
+  const rr=+document.getElementById('reachRatio').value||0;
+  document.getElementById('reachLenNm').value=(lenNm*(rr/100)).toFixed(2);
+  syncing=false; compute();
+}
+function syncFromNm(){
+  if(syncing) return; syncing=true;
+  const lenNm=+document.getElementById('courseLenNm').value||0;
+  const nm=+document.getElementById('reachLenNm').value||0;
+  document.getElementById('reachRatio').value = lenNm>0?((nm/lenNm)*100).toFixed(1):"0.0";
+  syncing=false; compute();
+}
+
+// ---- hybrid leg sync ----
+function syncHybridLeg(from){
+  const mEl=document.getElementById('hybridLegM'), nmEl=document.getElementById('hybridLegNm');
+  if(from==='m'){ const m=+mEl.value||0; nmEl.value=(m/1852).toFixed(2); }
+  else { const nm=+nmEl.value||0; mEl.value=Math.round(nm*1852); }
+  compute();
+}
+
+function compute(){
+  const t=document.getElementById("courseType").value,
+        axis=+document.getElementById("axis").value||0,
+        lineLen=+document.getElementById("lineLen").value||200,
+        lenNm=+document.getElementById("courseLenNm").value||0.6,
+        mode=document.getElementById("geomMode").value,
+        pCB={x:0,y:0},
+        uL=vec(axis-90),
+        pPin=add(pCB,scale(uL,lineLen)),
+        pMid=add(pCB,scale(uL,lineLen/2)),
+        uA=vec(axis),
+        uP=vec(axis+90),
+        lenM=lenNm*1852;
+
+  // show/hide UI bits
+  const trapBox=document.getElementById('trapezoidInputs');
+  const hybRow=document.getElementById('hybridRow');
+  if(t==='trapezoid'){ trapBox.classList.remove('hidden'); hybRow.classList.remove('hidden'); }
+  else { trapBox.classList.add('hidden'); hybRow.classList.add('hidden'); }
+
+  const enH=document.getElementById('enableHybrid').checked;
+  document.getElementById('hybLegM').className=enH?"":"hidden";
+  document.getElementById('hybLegNm').className=enH?"":"hidden";
+
+  let html = `<div class=section><h3>Start Line</h3>${card("CB","Pin",pCB,pPin)}</div>`;
+
+  if(t==='trapezoid'){
+    const ang=document.getElementById("trapAngle").value,
+          gw=+document.getElementById("gateW").value||30,
+          g3w=+document.getElementById("gate3W").value||30,
+          off=+document.getElementById("gateOff").value||93,
+          rr =+document.getElementById("reachRatio").value||67;
+
+    let rlNm=parseFloat(document.getElementById("reachLenNm").value);
+    if(!(rlNm>0)) rlNm=(lenNm*(rr/100));
+    const rlM=rlNm*1852;
+
+    const d=dirs(ang),u41=vec(axis+d.b41),u12=vec(axis+d.b12),u23=vec(axis+d.b23);
+
+    // ---- Gate 4 centre & 4P per geometry mode ----
+    let gateC, p4P;
+    if(mode==="simple"){
+      // centre from start-line mid + upwind offset
+      gateC = add(pMid, scale(uA, off));
+      p4P   = add(gateC, scale(uP, gw/2));
+    }else{
+      // strict: centre must be directly downwind of Mark 1 by 'off'
+      // do a two-pass like before, then lock centre under Mark 1
+      const gateC0 = add(pMid, scale(uA, off));
+      const p4P0   = add(gateC0, scale(uP, gw/2));
+      const p1_0   = add(p4P0, scale(u41, lenM));
+      gateC = add(p1_0, scale(uA, -off));
+      p4P   = add(gateC, scale(uP, gw/2));
+    }
+
+    // ---- Final marks from chosen 4P ----
+    const p1  = add(p4P, scale(u41, lenM));
+    const p2  = add(p1 , scale(u12, rlM));
+    const p3C = add(p2 , scale(u23, lenM));
+    const p3P = add(p3C, scale(uP , g3w/2));
+
+    html+=`<div class=section><h3>CB Reference (Trapezoid)</h3>
+           ${card("CB","4P",pCB,p4P)}${card("CB","1",pCB,p1)}${card("CB","2",pCB,p2)}${card("CB","3P",pCB,p3P)}</div>`;
+
+    // ---- Hybrid 4P (optional): exact leg length from Mark 1 along 4P→1 bearing ----
+    if(enH){
+      let legM = +document.getElementById('hybridLegM').value;
+      let legNm = +document.getElementById('hybridLegNm').value;
+      if(!(legM>0) && legNm>0) legM = Math.round(legNm*1852);
+      if(legM<0) legM=0; if(legM>lenM) legM=lenM;
+
+      const pH4P = add(p1, scale(u41, -legM));   // place *along the 4P→1 direction*
+      html+=`<div class=section><h3>Hybrid Gate 4</h3>
+             ${card("CB","Hybrid 4P",pCB,pH4P)}${card("Hybrid 4P","1",pH4P,p1)}</div>`;
+    }
+
+    html+=`<div class=section><h3>Course Legs</h3>
+           ${card("4P","1",p4P,p1)}${card("1","2",p1,p2)}${card("2","3P",p2,p3P)}${card("4P","3P",p4P,p3P)}</div>`;
+  }
+
+  if(t==='triangle'){
+    const uA=vec(axis), uP=vec(axis+90),
+          p3=add(pMid,scale(uA,50)), p1=add(p3,scale(uA,(+document.getElementById("courseLenNm").value||0.6)*1852)),
+          u12=vec(axis+240), p2=add(p1,scale(u12,dist(p3,p1))); // equal legs
+    html+=`<div class=section><h3>CB Reference (Triangle)</h3>
+           ${card("CB","1",pCB,p1)}${card("CB","2",pCB,p2)}${card("CB","3",pCB,p3)}</div>
+           <div class=section><h3>Course Legs</h3>
+           ${card("3","1",p3,p1)}${card("1","2",p1,p2)}${card("2","3",p2,p3)}</div>`;
+  }
+
+  if(t==='gybe90'){
+    const uA=vec(axis), p3=add(pMid,scale(uA,50)), lenM=(+document.getElementById("courseLenNm").value||0.6)*1852,
+          p1=add(p3,scale(uA,lenM)), rM=lenM*0.71, u12=vec(axis+225), p2=add(p1,scale(u12,rM)), u23=vec(axis+135);
+    html+=`<div class=section><h3>CB Reference (90° Gybe)</h3>
+           ${card("CB","1",pCB,p1)}${card("CB","2",pCB,p2)}${card("CB","3",pCB,p3)}</div>
+           <div class=section><h3>Course Legs</h3>
+           ${card("3","1",p3,p1)}${card("1","2",p1,p2)}${card("2","3",p2,p3)}</div>`;
+  }
+
+  document.getElementById("results").innerHTML=html;
+}
+
+// wire up
+["courseType","axis","lineLen","courseLenNm","geomMode","trapAngle","gateW","gate3W","gateOff"].forEach(id=>{
+  const el=document.getElementById(id); if(el){el.addEventListener("input",compute); el.addEventListener("change",compute);}
+});
+document.getElementById('reachRatio').addEventListener('input', syncFromPercent);
+document.getElementById('reachLenNm').addEventListener('input', syncFromNm);
+document.getElementById('enableHybrid').addEventListener('change', compute);
+document.getElementById('hybridLegM').addEventListener('input', ()=>syncHybridLeg('m'));
+document.getElementById('hybridLegNm').addEventListener('input', ()=>syncHybridLeg('nm'));
+
+compute();
+</script>
+</body>
+</html>
