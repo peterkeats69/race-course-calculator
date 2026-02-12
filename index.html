@@ -356,7 +356,7 @@ function compute(){
 }
 
 // ---- events ----
-['courseType','axis','lineLen','courseLenNm',
+['courseType','axis','lineLen',
  'trapAngle','gate4W','gate3W','gateOff',
  'wlGate4W','wlGateOff','wlAng'
 ].forEach(id=>{
@@ -364,6 +364,16 @@ function compute(){
   if(!e) return;
   e.addEventListener('input', compute);
   e.addEventListener('change', compute);
+});
+
+// Keep reach % consistent when course length changes (trapezoid)
+el('courseLenNm').addEventListener('input', ()=>{
+  if(el('courseType').value==='trapezoid') syncReachFromPct();
+  else compute();
+});
+el('courseLenNm').addEventListener('change', ()=>{
+  if(el('courseType').value==='trapezoid') syncReachFromPct();
+  else compute();
 });
 
 el('reachPct').addEventListener('input', syncReachFromPct);
